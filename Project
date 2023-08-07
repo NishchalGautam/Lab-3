@@ -6,22 +6,22 @@ function configure_target_machine() {
     target_name="$2"
     target_ip="$3"
 
-    # Change system name
+    # Changing system name
     ssh remoteadmin@"$target_mgmt" sudo hostnamectl set-hostname "$target_name"
 
-    # Change IP address
+    # Changing IP address
     ssh remoteadmin@"$target_mgmt" sudo ip addr flush dev eth0
     ssh remoteadmin@"$target_mgmt" sudo ip addr add "$target_ip"/24 dev eth0
 
-    # Add entry to /etc/hosts
+    # Adding entry to /etc/hosts
     ssh remoteadmin@"$target_mgmt" sudo bash -c "echo '$target_ip $target_name' >> /etc/hosts"
 
-    # Install ufw if necessary and allow connections to port 514/udp from the mgmt network
+    # Installing ufw if necessary and allow connections to port 514/udp from the mgmt network
     ssh remoteadmin@"$target_mgmt" sudo apt-get update
     ssh remoteadmin@"$target_mgmt" sudo apt-get install -y ufw
     ssh remoteadmin@"$target_mgmt" sudo ufw allow from 172.16.1.0/24 to any port 514 proto udp
 
-    # Configure rsyslog to listen for UDP connections
+    # Configuring rsyslog to listen for UDP connections
     ssh remoteadmin@"$target_mgmt" sudo sed -i 's/#module(load="imudp")/module(load="imudp")/g' /etc/rsyslog.conf
     ssh remoteadmin@"$target_mgmt" sudo sed -i 's/#input(type="imudp" port="514")/input(type="imudp" port="514")/g' /etc/rsyslog.conf
     ssh remoteadmin@"$target_mgmt" sudo systemctl restart rsyslog
