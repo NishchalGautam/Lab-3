@@ -1,0 +1,72 @@
+#!/bin/bash
+
+# Function to perform tasks on a target machine
+function configure_target_machine() {
+    target_mgmt="$1"
+    target_name="$2"
+    target_ip="$3"
+
+    # Change system name
+    ssh remoteadmin@"$target_mgmt" sudo hostnamectl set-hostname "$target_name"
+
+    # Change IP address
+    ssh remoteadmin@"$target_mgmt" sudo ip addr flush dev eth0
+    ssh remoteadmin@"$target_mgmt" sudo ip addr add "$target_ip"/24 dev eth0
+
+    # Add entry to /etc/hosts
+    ssh remoteadmin@"$target_mgmt" sudo bash -c "echo '$target_ip $target_name' >> /etc/hosts"
+
+    # Install ufw if necessary and allow connections to port 514/udp from the mgmt network
+    ssh remoteadmin@"$target_mgmt" sudo apt-get update
+    ssh remoteadmin@"$target_mgmt" sudo apt-get install -y ufw
+    ssh remoteadmin@"$target_mgmt" sudo ufw allow from 172.16.1.0/24 to any port 514 proto udp
+
+    # Configure rsyslog to listen for UDP connections
+    ssh remoteadmin@"$target_mgmt" sudo sed -i 's/#module(load="imudp")/module(load="imudp")/g' /etc/rsyslog.conf
+    ssh remoteadmin@"$target_mgmt" sudo sed -i 's/#input(type="imudp" port="514")/input(type="imudp" port="514")/g' /etc/rsyslog.conf
+    ssh remoteadmin@"$target_mgmt" sudo systemctl restart rsyslog
+}
+
+# Function to update the NMS /etc/hosts file
+function update_nms_hosts_file() {
+    echo "$1 $2" | sudo tee -a /etc/hosts
+}
+
+# Function to check if a service is running on a target machine
+function check_service_running() {
+    target_mgmt="$1"
+    service_name="$2"
+    ssh remoteadmin@"$target_mgmt" systemctl is-active "$service_name"
+}
+
+# Configuring target1-mgmt
+configure_target_machine "172.16.1.10" "loghost" "172.16.1.3"
+
+# Configuring target2-mgmt
+configure_target_machine "172.16.1.11" "webhost" "172.16.1.4"
+
+# Installing apache2 on target2-mgmt
+ssh remoteadmin@"172.16.1.11" sudo apt-get install -y apache2
+
+# Configuring rsyslog on target2-mgmt to send logs to loghost
+ssh remoteadmin@"172.16.1.11" sudo bash -c 'echo "*.* @loghost" >> /etc/rsyslog.conf'
+ssh remoteadmin@"172.16.1.11" sudo systemctl restart rsyslog
+
+# Updating NMS /etc/hosts file
+update_nms_hosts_file "172.16.1.3" "loghost"
+update_nms_hosts_file "172.16.1.4" "webhost"
+
+# Verifying Apache web page on NMS
+if firefox http://webhost &>/dev/null; then
+    echo "Apache web page on webhost is accessible from NMS (webhost)."
+else
+    echo "Apache web page on webhost is not accessible from NMS (webhost)."
+fi
+
+# Verifying syslog entries on loghost
+log_entries=$(ssh remoteadmin@"172.16.1.3" grep "webhost" /var/log/syslog)
+if [ -n "$log_entries" ]; then
+    echo "Syslog entries from webhost found on loghost."
+else
+    echo "No syslog entries from webhost found on loghost."
+fi
